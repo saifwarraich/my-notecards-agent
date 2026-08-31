@@ -1,0 +1,17 @@
+{
+  "name": "Notecards",
+  "short_name": "Notecards",
+  "description": "Notes that turn themselves into flashcards.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f7f7",
+  "theme_color": "#f7f7f7",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

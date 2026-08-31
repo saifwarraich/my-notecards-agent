@@ -1,36 +1,167 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Notecards
 
-## Getting Started
+A notes app where saving is the trigger. Write what you're learning — rich text,
+pasted screenshots and diagrams — hit save, and an agent reads *what changed
+since the last save* and writes flashcards for the new material. Installable as
+a PWA.
 
-First, run the development server:
+The point of the project is the agent, not the CRUD: it has tools, it decides
+which to call, and it writes to the database itself. Every run is recorded so
+you can see exactly what it did.
+
+## How a save becomes flashcards
+
+```
+PUT /api/notes/[id]
+  ├─ diff against the last version
+  ├─ trivial change?  → stop, no agent run, no API spend
+  └─ insert agent_jobs row (status: pending)
+        └─ enqueue → POST /api/agent/run
+              └─ agent loop (max 8 steps)
+                    ├─ getNoteDiff()            what's actually new
+                    ├─ readNote()               surrounding context
+                    ├─ viewImages([...])        looks at pasted images
+                    ├─ getExistingFlashcards()  don't repeat yourself
+                    └─ saveFlashcards([...])    agent writes its own rows
+              └─ job → done, with the full tool trace stored
+```
+
+The browser polls the note until the job settles, then shows the cards and the
+trace.
+
+### Why it's shaped this way
+
+- **The agent owns the write path.** Cards reach the database only through the
+  agent's `saveFlashcards` tool. We never parse prose into rows.
+- **The trigger is decoupled.** Saving enqueues a job and returns; it never
+  waits on a model. With a `QSTASH_TOKEN` set, delivery goes through a real
+  queue with retries. Without one, it falls back to a fire-and-forget POST so
+  local dev needs no extra infra.
+- **Runs are cheap to skip.** A save that adds fewer than 40 characters of new
+  prose doesn't start a run, and only one job per note is in flight at a time.
+- **The agent can see, not just read.** `viewImages` returns real image bytes
+  as model content, so a diagram or screenshot is studied like any other
+  material. Image payloads are stripped from the stored trace.
+- **Failures are visible, not silent.** Jobs move `pending → running →
+  done | failed`. A missing API key fails the job with that message rather than
+  leaving it pending; anything stuck for five minutes gets reaped.
+
+## Provider-agnostic by construction
+
+`src/lib/model.ts` is the only file that knows a vendor exists. Everything else
+works against the AI SDK's `LanguageModel` type, so switching models is an env
+var:
+
+```bash
+AI_PROVIDER=google     AI_MODEL=gemini-3.6-flash
+AI_PROVIDER=anthropic  AI_MODEL=claude-sonnet-5
+AI_PROVIDER=openai     AI_MODEL=gpt-5
+AI_PROVIDER=xai        AI_MODEL=grok-4
+```
+
+The tool definitions, the agent loop, and the prompt are unchanged across all
+four. Which model ran is recorded on every job.
+
+## Stack
+
+| | |
+|---|---|
+| App | Next.js 16 (App Router), React 19 |
+| UI | shadcn/ui + Tailwind v4 |
+| Editor | Tiptap (bold/italic/underline, headings, lists, code, images) |
+| Theming | next-themes, light + dark |
+| DB | Neon Postgres + Drizzle |
+| Agent | Vercel AI SDK v7 tool-calling loop |
+| Queue | Upstash QStash (optional) |
+
+## Running it
+
+```bash
+cp .env.example .env
+```
+
+Fill in `DATABASE_URL` (from the Neon console) and
+`GOOGLE_GENERATIVE_AI_API_KEY`, then:
+
+```bash
+npm run db:push
+```
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Write a note with a few real facts in it, hit save (or `⌘S`), and watch the
+Agent tab.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploying
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Push to GitHub, import into Vercel, and set the same env vars there plus
+`APP_URL` (your deployed URL) so the app can reach its own agent endpoint. For
+the queued path, add `QSTASH_TOKEN` from Upstash.
 
-## Learn More
+## Rich text and images
 
-To learn more about Next.js, take a look at the following resources:
+The editor stores two things per note: the HTML it renders, and the same content
+flattened to plain text. Diffs and the agent read the flattened text, so
+bolding a word doesn't read as new material — but pasting an image does.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Pasted and dropped images upload to `/api/images` and are stored as base64 rows,
+which keeps the project runnable without an object store. The editor references
+them as `/api/images/<id>`; the agent pulls the same ids out of the HTML and
+passes them to `viewImages`. For image-heavy use, swap that one table for S3 or
+Vercel Blob — nothing else changes.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Pages
 
-## Deploy on Vercel
+Notes, Review and Agent are real routes (`/`, `/review`, `/agent`), not panels
+in one page — so a reload, a bookmark, or the back button all land where you
+expect, and each page gets its own title. They are statically prerendered and
+prefetched, so switching between them stays instant.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Light and dark both ship. The toggle sits in the header and follows the system
+preference until you override it, after which the choice persists.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Review
+
+The Review page is one deck per note. Each deck shows a single card face-up on a
+visible pile: click to reveal the answer, arrows to move through it, and a
+position counter above. Decks load four at a time and the next page fetches when
+a sentinel scrolls into view, so a large library never loads at once.
+
+Paging is by offset over `updated_at DESC`, which can repeat a row if a note is
+saved mid-scroll — appended pages are deduplicated by id to absorb that.
+
+## Schema
+
+- `notes` — title, HTML body, flattened text, version counter
+- `note_versions` — immutable snapshot per save; what the diff runs against
+- `note_images` — pasted images, referenced from the body HTML
+- `agent_jobs` — one row per run: status, model, tool trace, cards created
+- `flashcards` — written by the agent, linked to the note and the job
+
+## Running against local Postgres
+
+`DATABASE_URL` picks the driver: a `neon.tech` host uses Neon's HTTP driver,
+anything else uses a normal TCP connection. So a container works for local dev:
+
+```bash
+docker run -d --name notecards-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=notecards -p 55432:5432 postgres:16-alpine
+```
+
+Point `DATABASE_URL` at `postgresql://postgres:postgres@localhost:55432/notecards`
+and run `npm run db:push`.
+
+To exercise the agent's tools against a real note without spending a token:
+
+```bash
+npm run agent:smoke -- <noteId>
+```
+
+To fill the Review tab with demo decks (no agent runs, no API spend):
+
+```bash
+npm run seed:demo
+```
+
+Remove them again with `npm run seed:demo -- --clean`.
