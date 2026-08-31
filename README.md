@@ -124,7 +124,8 @@ preference until you override it, after which the choice persists.
 
 ## Review
 
-The Review page is one deck per note. Each deck shows a single card face-up on a
+Cards live only here — the editor is just for writing. The Review page is one
+deck per note. Each deck shows a single card face-up on a
 visible pile: click to reveal the answer, arrows to move through it, and a
 position counter above. Decks load four at a time and the next page fetches when
 a sentinel scrolls into view, so a large library never loads at once.

@@ -6,9 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import type { Flashcard, Job, Note, SaveResult } from "@/lib/types";
-import { JobTrace } from "./job-trace";
-import { CardList } from "./card-list";
+import type { Job, Note, SaveResult } from "@/lib/types";
 import { RichEditor } from "./rich-editor";
 
 const SAVE_MESSAGES: Record<SaveResult["reason"], string> = {
@@ -32,20 +30,18 @@ export function NoteEditor({
   const [body, setBody] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [saving, setSaving] = useState(false);
-  const [cards, setCards] = useState<Flashcard[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let active = true;
-    api<{ note: Note; cards: Flashcard[]; jobs: Job[] }>(`/api/notes/${noteId}`)
+    api<{ note: Note; jobs: Job[] }>(`/api/notes/${noteId}`)
       .then((data) => {
         if (!active) return;
         setNote(data.note);
         setTitle(data.note.title);
         setBody(data.note.body);
         setBodyText(data.note.bodyText);
-        setCards(data.cards);
         setJobs(data.jobs);
       })
       .catch(() => {
@@ -63,17 +59,14 @@ export function NoteEditor({
     let ticks = 0;
     pollRef.current = setInterval(async () => {
       ticks += 1;
-      let data: { cards: Flashcard[]; jobs: Job[] };
+      let data: { jobs: Job[] };
       try {
-        data = await api<{ cards: Flashcard[]; jobs: Job[] }>(
-          `/api/notes/${noteId}`,
-        );
+        data = await api<{ jobs: Job[] }>(`/api/notes/${noteId}`);
       } catch {
         // api() already surfaced the error; stop rather than hammering.
         if (pollRef.current) clearInterval(pollRef.current);
         return;
       }
-      setCards(data.cards);
       setJobs(data.jobs);
       const busy = data.jobs.some(
         (j: Job) => j.status === "pending" || j.status === "running",
@@ -150,6 +143,15 @@ export function NoteEditor({
           placeholder="Untitled"
           className="border-0 shadow-none text-lg font-heading focus-visible:ring-0 px-1"
         />
+        {activeJob ? (
+          <span
+            className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+            title={`Agent is working on version ${note.version}`}
+          >
+            <Loader2 className="size-3.5 animate-spin" />
+            <span className="hidden sm:inline">agent working</span>
+          </span>
+        ) : null}
         <Button onClick={save} disabled={saving} size="sm">
           {saving ? (
             <Loader2 className="animate-spin" />
@@ -171,20 +173,6 @@ export function NoteEditor({
           setBodyText(value.text);
         }}
       />
-
-      <div className="max-h-[45%] shrink-0 overflow-y-auto border-t">
-        {activeJob ? (
-          <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            Agent is working on version {note.version}…
-          </div>
-        ) : null}
-        {jobs[0] && !activeJob ? <JobTrace job={jobs[0]} /> : null}
-        <CardList
-          cards={cards}
-          onDeleted={(id) => setCards((c) => c.filter((x) => x.id !== id))}
-        />
-      </div>
     </div>
   );
 }

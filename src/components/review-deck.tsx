@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Loader2, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
 import { pageFetcher, useInfiniteList } from "@/lib/use-infinite";
 import { cn } from "@/lib/utils";
 import type { Flashcard } from "@/lib/types";
@@ -24,8 +25,27 @@ export function ReviewDeck() {
     () => pageFetcher<Deck>("/api/decks", "decks", DECKS_PER_PAGE),
     [],
   );
-  const { items: decks, hasMore, loading, ready, sentinel } =
+  const { items: decks, hasMore, loading, ready, sentinel, setItems } =
     useInfiniteList<Deck>(fetchPage);
+
+  // Cards live here now, so this is where a bad one gets thrown away.
+  const removeCard = useCallback(
+    async (noteId: string, cardId: string) => {
+      await api(`/api/flashcards?id=${cardId}`, { method: "DELETE" });
+      setItems((current) =>
+        current.map((deck) =>
+          deck.id === noteId
+            ? {
+                ...deck,
+                cardCount: deck.cardCount - 1,
+                cards: deck.cards.filter((c) => c.id !== cardId),
+              }
+            : deck,
+        ),
+      );
+    },
+    [setItems],
+  );
 
   if (!ready) {
     return (
@@ -48,7 +68,7 @@ export function ReviewDeck() {
     <div className="mt-4">
       <div className="grid gap-6 sm:grid-cols-2">
         {decks.map((deck) => (
-          <DeckStack key={deck.id} deck={deck} />
+          <DeckStack key={deck.id} deck={deck} onRemove={removeCard} />
         ))}
       </div>
 
@@ -69,7 +89,13 @@ export function ReviewDeck() {
  * A deck: one card face-up on a visible stack. Click to reveal the answer,
  * arrows to move through the pile.
  */
-function DeckStack({ deck }: { deck: Deck }) {
+function DeckStack({
+  deck,
+  onRemove,
+}: {
+  deck: Deck;
+  onRemove: (noteId: string, cardId: string) => Promise<void>;
+}) {
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
 
@@ -87,6 +113,15 @@ function DeckStack({ deck }: { deck: Deck }) {
   }
 
   if (!card) return null;
+
+  async function discard() {
+    // Step back if we just removed the last card in the pile.
+    if (index >= total - 1) setIndex(Math.max(0, index - 1));
+    setRevealed(false);
+    await onRemove(deck.id, card.id).catch(() => {
+      // api() already showed the toast.
+    });
+  }
 
   return (
     <section className="flex flex-col">
@@ -145,6 +180,14 @@ function DeckStack({ deck }: { deck: Deck }) {
           className="ml-auto"
         >
           <RotateCcw />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={discard}
+          aria-label="Delete this card"
+        >
+          <X className="text-destructive" />
         </Button>
       </div>
     </section>
