@@ -35,11 +35,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${fontSans.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">
+      {/* The shell is exactly one viewport tall and never scrolls itself.
+          Each page decides which of its own regions scroll. */}
+      <body className="flex h-dvh flex-col overflow-hidden">
         <ThemeProvider>
-          <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-4">
+          <main className="mx-auto flex w-full max-w-6xl min-h-0 flex-1 flex-col px-4 pt-4">
             <SiteHeader />
-            {children}
+            <div className="flex min-h-0 flex-1 flex-col">{children}</div>
           </main>
           <Toaster />
           <RegisterSW />

@@ -142,8 +142,8 @@ export function NoteEditor({
   );
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 border-b p-3">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b p-3">
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -172,7 +172,7 @@ export function NoteEditor({
         }}
       />
 
-      <div className="border-t max-h-[45vh] overflow-y-auto">
+      <div className="max-h-[45%] shrink-0 overflow-y-auto border-t">
         {activeJob ? (
           <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />

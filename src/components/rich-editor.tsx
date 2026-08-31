@@ -75,8 +75,10 @@ export function RichEditor({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Toolbar editor={editor} noteId={noteId} />
-      <EditorContent editor={editor} className="flex-1 overflow-y-auto" />
+      <div className="shrink-0">
+        <Toolbar editor={editor} noteId={noteId} />
+      </div>
+      <EditorContent editor={editor} className="min-h-0 flex-1 overflow-y-auto" />
     </div>
   );
 }
