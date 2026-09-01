@@ -1,13 +1,13 @@
 // Minimal service worker: makes the app installable and keeps the shell
 // available offline. API calls are always network-first — stale notes would be
 // worse than no notes.
-const SHELL_CACHE = "notecards-shell-v2";
+const SHELL_CACHE = "notecards-shell-v3";
 const SHELL = [
   "/",
   "/review",
   "/agent",
   "/manifest.webmanifest",
-  "/icon.svg",
+  "/pwa-icon.svg",
 ];
 
 self.addEventListener("install", (event) => {

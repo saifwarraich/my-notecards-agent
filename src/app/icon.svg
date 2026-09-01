@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="32" r="32" fill="#333333" />
+  <!-- Lowercase n drawn as strokes so it renders identically everywhere,
+       with no dependency on a font being available. -->
+  <g
+    fill="none"
+    stroke="#f2f2f2"
+    stroke-width="5.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M24 44V25" />
+    <path d="M24 31c0-7 16-7 16 0v13" />
+  </g>
+</svg>
