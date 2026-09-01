@@ -12,6 +12,7 @@ export const GET = handle(async () => {
       id: agentJobs.id,
       status: agentJobs.status,
       model: agentJobs.model,
+      trigger: agentJobs.trigger,
       steps: agentJobs.steps,
       cardsCreated: agentJobs.cardsCreated,
       error: agentJobs.error,

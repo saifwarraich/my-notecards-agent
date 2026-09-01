@@ -121,7 +121,13 @@ export const PUT = handle(async (request: Request, { params }: Context) => {
     .insert(agentJobs)
     .values({ noteId: id, version })
     .returning();
-  await enqueueAgentJob(job.id);
+  // Recorded on the job so a stuck one explains itself in the Agent tab,
+  // rather than only in the host's function logs.
+  const handoff = await enqueueAgentJob(job.id);
+  await db
+    .update(agentJobs)
+    .set({ trigger: handoff.detail })
+    .where(eq(agentJobs.id, job.id));
 
   return NextResponse.json({ note, job, reason: "queued" });
 });

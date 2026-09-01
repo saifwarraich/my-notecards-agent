@@ -32,6 +32,7 @@ export type Job = {
   id: string;
   status: "pending" | "running" | "done" | "failed";
   model: string | null;
+  trigger: string | null;
   steps: AgentStep[];
   cardsCreated: number;
   error: string | null;

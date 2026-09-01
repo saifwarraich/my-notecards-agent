@@ -23,17 +23,39 @@ Rules:
 - If the change added nothing worth memorising, call saveFlashcards with an empty array. That is a valid, expected outcome.
 - Never produce more than 8 cards in a single run.`;
 
+/**
+ * How long a claim is trusted before another delivery may take the job over.
+ * Must exceed the longest a run can actually survive: on Vercel that is the
+ * function duration cap, since the platform kills anything past it.
+ */
+const LEASE_SECONDS = Number(process.env.AGENT_LEASE_SECONDS ?? 90);
+
 /** Runs the agent loop for one job and records everything it did. */
 export async function runAgentJob(jobId: string) {
-  // Claim the job with a single conditional UPDATE. Reading the status and
-  // then writing it would let two deliveries of the same job — a QStash retry
-  // landing on a run that is still alive, or two serverless instances — both
-  // pass the check and both run the agent, duplicating cards and spend.
-  // Whoever loses the race gets no row back.
+  // Claim the job with a single conditional UPDATE, so two deliveries of the
+  // same job cannot both run the agent and duplicate its work.
+  //
+  // The claim is a lease, not a lock. A run killed mid-flight — a serverless
+  // function hitting its duration cap is the usual way — leaves the row stuck
+  // at `running` with nobody working on it. Claiming only `pending` rows would
+  // then make every retry a no-op, which is worse than the race it prevents:
+  // the job never recovers. Past the lease we assume the holder is dead and
+  // take over.
   const [job] = await db
     .update(agentJobs)
-    .set({ status: "running" })
-    .where(and(eq(agentJobs.id, jobId), eq(agentJobs.status, "pending")))
+    .set({ status: "running", startedAt: new Date() })
+    .where(
+      and(
+        eq(agentJobs.id, jobId),
+        sql`(
+          ${agentJobs.status} = 'pending'
+          or (
+            ${agentJobs.status} = 'running'
+            and ${agentJobs.startedAt} < now() - ${sql.raw(`interval '${LEASE_SECONDS} seconds'`)}
+          )
+        )`,
+      ),
+    )
     .returning();
 
   if (!job) {
@@ -140,6 +162,6 @@ export async function reapStaleJobs() {
     })
     .where(
       sql`${agentJobs.status} in ('pending', 'running')
-          and ${agentJobs.createdAt} < now() - interval '5 minutes'`,
+          and ${agentJobs.createdAt} < now() - interval '15 minutes'`,
     );
 }

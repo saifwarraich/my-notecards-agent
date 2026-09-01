@@ -81,6 +81,14 @@ export const agentJobs = pgTable(
     status: text("status").notNull().default("pending"),
     /** Which provider/model actually ran, recorded for the demo. */
     model: text("model"),
+    /** How the job was handed off, and why that failed if it did. */
+    trigger: text("trigger"),
+    /**
+     * When the current attempt claimed the job. A claim may take over a run
+     * older than the lease, which is how a run killed mid-flight (a function
+     * timeout) gets retried instead of blocking every retry after it.
+     */
+    startedAt: timestamp("started_at", { withTimezone: true }),
     /** Trace of what the agent did: tool calls, args, results. */
     steps: jsonb("steps").$type<AgentStep[]>().notNull().default([]),
     cardsCreated: integer("cards_created").notNull().default(0),

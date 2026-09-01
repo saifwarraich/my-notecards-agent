@@ -18,6 +18,7 @@ import { after } from "next/server";
  *   forever.
  */
 export async function enqueueAgentJob(jobId: string) {
+  let publishError: string | null = null;
   const target = `${await baseUrl()}/api/agent/run`;
 
   // QStash calls us over the public internet, so it cannot reach a dev server.
@@ -36,16 +37,16 @@ export async function enqueueAgentJob(jobId: string) {
         },
       );
 
-      if (response.ok) return { via: "qstash" as const };
+      if (response.ok) return { via: "qstash" as const, detail: "queued via QStash" };
 
       // Never swallow this. A rejected publish means the job is never
       // delivered, and without a log there is nothing to see in QStash, in the
       // model provider, or on the job itself.
-      console.error(
-        `QStash publish failed (${response.status}): ${await response.text()} — falling back to after()`,
-      );
+      publishError = `QStash publish failed (${response.status}): ${await response.text()}`;
+      console.error(`${publishError} — falling back to after()`);
     } catch (error) {
-      console.error(`QStash publish threw, falling back to after():`, error);
+      publishError = `QStash publish threw: ${error instanceof Error ? error.message : String(error)}`;
+      console.error(`${publishError} — falling back to after()`);
     }
   }
 
@@ -61,7 +62,12 @@ export async function enqueueAgentJob(jobId: string) {
     }
   });
 
-  return { via: "after" as const };
+  return {
+    via: "after" as const,
+    detail: publishError
+      ? `${publishError} — ran inline instead`
+      : "ran inline via after()",
+  };
 }
 
 function isPubliclyReachable(url: string) {

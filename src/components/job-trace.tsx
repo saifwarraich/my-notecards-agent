@@ -44,7 +44,17 @@ export function JobTrace({ job }: { job: Job }) {
       {open ? (
         <div className="mt-3 space-y-2 pl-6">
           {job.error ? (
-            <p className="text-destructive text-xs">{job.error}</p>
+            <p className="text-xs text-destructive">{job.error}</p>
+          ) : null}
+          {job.trigger ? (
+            <p className="text-xs text-muted-foreground">
+              Handoff: {job.trigger}
+            </p>
+          ) : null}
+          {job.steps.length === 0 && !job.error ? (
+            <p className="text-xs text-muted-foreground">
+              No tool calls recorded — the run never reached the model.
+            </p>
           ) : null}
           {job.steps.map((step, i) => (
             <div key={i} className="rounded-md bg-muted/60 p-2">
