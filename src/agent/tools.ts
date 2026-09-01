@@ -4,6 +4,9 @@ import { z } from "zod";
 import { db, flashcards, noteImages, noteVersions, notes } from "@/db";
 import { diffLines } from "@/lib/diff";
 
+/** Above this, the note is fetched separately instead of inlined in the diff. */
+const INLINE_TEXT_LIMIT = 6000;
+
 /**
  * The agent's toolbelt. The agent decides what to call and in what order — we
  * never parse its prose into rows. `saveFlashcards` is the only way cards reach
@@ -33,7 +36,7 @@ export function buildTools(ctx: { noteId: string; jobId: string }) {
 
     getNoteDiff: tool({
       description:
-        "Get the lines added and removed since the previous saved version, and which images are new. Use this to focus on genuinely new material instead of re-covering the whole note.",
+        "Get what changed since the previous saved version, plus the note's full text when it is short enough to include. Start here: for most notes this is everything you need, and readNote is then unnecessary.",
       inputSchema: z.object({}),
       execute: async () => {
         const [current] = await db
@@ -62,11 +65,22 @@ export function buildTools(ctx: { noteId: string; jobId: string }) {
         const currentImages = extractImageIds(current.body);
         const previousImages = new Set(extractImageIds(previous?.body ?? ""));
 
+        // Carrying the note text here saves a whole model round trip, which
+        // matters when the run has to finish inside a function timeout. Long
+        // notes still fall back to readNote rather than bloating the prompt.
+        const fullText =
+          current.bodyText.length <= INLINE_TEXT_LIMIT
+            ? current.bodyText
+            : undefined;
+
         return {
           isFirstVersion: !previous,
+          title: current.title,
           addedLines: added,
           removedLines: removed,
           newImageIds: currentImages.filter((id) => !previousImages.has(id)),
+          fullText,
+          fullTextOmitted: fullText === undefined,
         };
       },
     }),
