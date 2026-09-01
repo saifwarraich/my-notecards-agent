@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import {
   agentJobs,
@@ -100,11 +100,18 @@ export const PUT = handle(async (request: Request, { params }: Context) => {
     return NextResponse.json({ note, job: null, reason: "no-new-material" });
   }
 
-  // One in-flight job per note keeps runs from stacking up on rapid saves.
+  // One in-flight job per note. `running` counts as in-flight too: two agents
+  // on the same note would each call getExistingFlashcards before either
+  // saved, so neither would see the other's cards and both would write them.
   const [inFlight] = await db
     .select({ id: agentJobs.id })
     .from(agentJobs)
-    .where(and(eq(agentJobs.noteId, id), eq(agentJobs.status, "pending")))
+    .where(
+      and(
+        eq(agentJobs.noteId, id),
+        inArray(agentJobs.status, ["pending", "running"]),
+      ),
+    )
     .limit(1);
   if (inFlight) {
     return NextResponse.json({ note, job: null, reason: "already-queued" });

@@ -1,5 +1,5 @@
 import { generateText, stepCountIs } from "ai";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { agentJobs, db, type AgentStep } from "@/db";
 import { getModel } from "@/lib/model";
 import { buildTools } from "./tools";
@@ -25,20 +25,25 @@ Rules:
 
 /** Runs the agent loop for one job and records everything it did. */
 export async function runAgentJob(jobId: string) {
+  // Claim the job with a single conditional UPDATE. Reading the status and
+  // then writing it would let two deliveries of the same job — a QStash retry
+  // landing on a run that is still alive, or two serverless instances — both
+  // pass the check and both run the agent, duplicating cards and spend.
+  // Whoever loses the race gets no row back.
   const [job] = await db
-    .select()
-    .from(agentJobs)
-    .where(eq(agentJobs.id, jobId));
-  if (!job) throw new Error(`job ${jobId} not found`);
-  if (job.status !== "pending") return { skipped: true, status: job.status };
-
-  // Claim the job before doing anything that can throw. Resolving the model
-  // fails when a key is missing, and that has to land on the job as `failed`
-  // rather than leaving it pending forever.
-  await db
     .update(agentJobs)
     .set({ status: "running" })
-    .where(eq(agentJobs.id, jobId));
+    .where(and(eq(agentJobs.id, jobId), eq(agentJobs.status, "pending")))
+    .returning();
+
+  if (!job) {
+    const [existing] = await db
+      .select({ status: agentJobs.status })
+      .from(agentJobs)
+      .where(eq(agentJobs.id, jobId));
+    if (!existing) throw new Error(`job ${jobId} not found`);
+    return { skipped: true, status: existing.status };
+  }
 
   try {
     const { model, label } = getModel();
