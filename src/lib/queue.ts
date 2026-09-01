@@ -1,41 +1,78 @@
 import { headers } from "next/headers";
+import { after } from "next/server";
 
 /**
- * Trigger boundary. Saving a note never runs the agent inline — it enqueues a
- * job and returns. In production QStash delivers the job (with retries and
- * signature verification); locally we fall back to a fire-and-forget POST to
- * the same endpoint, authenticated with a shared secret.
+ * Trigger boundary. Saving a note never runs the agent inline — it records a
+ * job and hands off, so save latency does not depend on a model call.
+ *
+ * Two ways to hand off:
+ *
+ * - QStash calls the agent endpoint for us and retries if that call fails or
+ *   times out. This is the durable path: use it in production, where a run can
+ *   outlive the function that started it.
+ *
+ * - Otherwise the work is scheduled with `after()`, which keeps the current
+ *   invocation alive until it finishes. A bare `fetch()` without awaiting does
+ *   NOT work here — the platform may freeze the instance as soon as the
+ *   response is sent, dropping the request and leaving the job pending
+ *   forever.
  */
 export async function enqueueAgentJob(jobId: string) {
   const target = `${await baseUrl()}/api/agent/run`;
-  const body = JSON.stringify({ jobId });
 
-  if (process.env.QSTASH_TOKEN) {
-    await fetch(`https://qstash.upstash.io/v2/publish/${target}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.QSTASH_TOKEN}`,
-        "Content-Type": "application/json",
-        "Upstash-Retries": "2",
-      },
-      body,
-    });
-    return { via: "qstash" as const };
+  // QStash calls us over the public internet, so it cannot reach a dev server.
+  if (process.env.QSTASH_TOKEN && isPubliclyReachable(target)) {
+    try {
+      const response = await fetch(
+        `https://qstash.upstash.io/v2/publish/${target}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.QSTASH_TOKEN}`,
+            "Content-Type": "application/json",
+            "Upstash-Retries": "3",
+          },
+          body: JSON.stringify({ jobId }),
+        },
+      );
+
+      if (response.ok) return { via: "qstash" as const };
+
+      // Never swallow this. A rejected publish means the job is never
+      // delivered, and without a log there is nothing to see in QStash, in the
+      // model provider, or on the job itself.
+      console.error(
+        `QStash publish failed (${response.status}): ${await response.text()} — falling back to after()`,
+      );
+    } catch (error) {
+      console.error(`QStash publish threw, falling back to after():`, error);
+    }
   }
 
-  // Fire and forget: we do not await, so save latency stays flat.
-  void fetch(target, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-agent-secret": process.env.AGENT_SECRET ?? "",
-    },
-    body,
-  }).catch(() => {
-    // The job stays `pending` and can be retried from the UI.
+  // Run it in this invocation, after the response has gone out. No HTTP hop,
+  // no shared secret, and nothing for the platform to cut short.
+  const { runAgentJob } = await import("@/agent/run");
+  after(async () => {
+    try {
+      await runAgentJob(jobId);
+    } catch (error) {
+      // The job row already records the failure; this is for the logs.
+      console.error(`Agent job ${jobId} failed:`, error);
+    }
   });
 
-  return { via: "direct" as const };
+  return { via: "after" as const };
+}
+
+function isPubliclyReachable(url: string) {
+  const { hostname } = new URL(url);
+  return !(
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".local")
+  );
 }
 
 async function baseUrl() {
