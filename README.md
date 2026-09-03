@@ -9,6 +9,12 @@ The point of the project is the agent, not the CRUD: it has tools, it decides
 which to call, and it writes to the database itself. Every run is recorded so
 you can see exactly what it did.
 
+## Screenshots
+
+| Notes | Review |
+|---|---|
+| ![Notes editor](docs/screenshots/notes.png) | ![Review deck](docs/screenshots/review.png) |
+
 ## How a save becomes flashcards
 
 ```
@@ -16,7 +22,9 @@ PUT /api/notes/[id]
   ├─ diff against the last version
   ├─ trivial change?  → stop, no agent run, no API spend
   └─ insert agent_jobs row (status: pending)
-        └─ enqueue → POST /api/agent/run
+        ├─ after()  → run the agent inline, once the response has gone out
+        └─ QStash   → backup delivery, delayed, in case the inline run is
+                       killed by the platform's duration cap
               └─ agent loop (max 8 steps)
                     ├─ getNoteDiff()            what's actually new
                     ├─ readNote()               surrounding context
@@ -26,6 +34,10 @@ PUT /api/notes/[id]
               └─ job → done, with the full tool trace stored
 ```
 
+Both paths claim the job with a lease before running it, so whichever arrives
+first does the work and the other is skipped — the job gets done if *either*
+path works, rather than only if the chosen one does.
+
 The browser polls the note until the job settles, then shows the cards and the
 trace.
 
@@ -33,10 +45,10 @@ trace.
 
 - **The agent owns the write path.** Cards reach the database only through the
   agent's `saveFlashcards` tool. We never parse prose into rows.
-- **The trigger is decoupled.** Saving enqueues a job and returns; it never
-  waits on a model. With a `QSTASH_TOKEN` set, delivery goes through a real
-  queue with retries. Without one, it falls back to a fire-and-forget POST so
-  local dev needs no extra infra.
+- **The trigger doesn't depend on external infra.** Saving runs the agent
+  inline after the response is sent, so local dev needs nothing extra. With a
+  `QSTASH_TOKEN` set, a delayed backup delivery through a real queue picks up
+  any run the platform killed mid-flight.
 - **Runs are cheap to skip.** A save that adds fewer than 40 characters of new
   prose doesn't start a run, and only one job per note is in flight at a time.
 - **The agent can see, not just read.** `viewImages` returns real image bytes
@@ -44,7 +56,7 @@ trace.
   material. Image payloads are stripped from the stored trace.
 - **Failures are visible, not silent.** Jobs move `pending → running →
   done | failed`. A missing API key fails the job with that message rather than
-  leaving it pending; anything stuck for five minutes gets reaped.
+  leaving it pending; anything stuck past its lease gets reaped and retried.
 
 ## Provider-agnostic by construction
 
