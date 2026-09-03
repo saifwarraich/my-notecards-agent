@@ -178,3 +178,11 @@ npm run seed:demo
 ```
 
 Remove them again with `npm run seed:demo -- --clean`.
+
+## Contributing
+
+Bug reports and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE)
